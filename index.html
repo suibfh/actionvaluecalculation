@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BFH 行動値ツール</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 10px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2 {
+            color: #0056b3;
+            border-bottom: 2px solid #0056b3;
+            padding-bottom: 5px;
+            margin-bottom: 15px;
+        }
+        .input-section, .results-section {
+            margin-bottom: 20px;
+        }
+        .unit-inputs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .unit-input {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #e9e9e9;
+        }
+        .unit-input label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .unit-input input[type="text"],
+        .unit-input input[type="number"] {
+            width: calc(100% - 12px); /* Adjust for padding */
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            display: inline-block;
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+            position: sticky;
+            top: 0; /* Make header sticky for scrolling */
+        }
+        tbody tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .action-cell {
+            background-color: #28a745; /* Green for action */
+            color: white;
+            font-weight: bold;
+        }
+        .results-table-container {
+            max-height: 400px; /* Limit height for scrolling */
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BFH 行動値ツール</h1>
+
+        <div class="input-section">
+            <h2>ユニット設定 (最大10体)</h2>
+            <div class="unit-inputs" id="player-units">
+                </div>
+             <div class="unit-inputs" id="enemy-units">
+                </div>
+            <button onclick="runSimulation()">シミュレーション実行</button>
+        </div>
+
+        <div class="results-section">
+            <h2>シミュレーション結果 (50演算)</h2>
+            <div class="results-table-container">
+                <table id="results-table">
+                    <thead>
+                        <tr>
+                            <th>演算</th>
+                            </tr>
+                    </thead>
+                    <tbody>
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const NUM_CALCULATIONS = 50;
+        const MAX_UNITS_PER_SIDE = 5;
+        const ACTION_THRESHOLD = 1000;
+
+        // Unit data structure
+        class Unit {
+            constructor(id, name, baseAgility, side) {
+                this.id = id; // Unique ID (e.g., 'player-1', 'enemy-3')
+                this.name = name || `Unit ${id}`; // Default name
+                this.baseAgility = baseAgility;
+                this.currentAgility = baseAgility; // Current agility affected by buffs/debuffs
+                this.actionValue = 0;
+                this.side = side; // 'player' or 'enemy'
+                this.actionCount = 0; // Number of times this unit has acted
+                this.buffs = []; // Array to hold active buff/debuff objects
+            }
+
+            // Calculate effective agility based on buffs/debuffs (Simplified for now)
+            // TODO: Implement complex buff/debuff stacking logic here
+            getEffectiveAgility() {
+                 // For now, just return base agility + 100
+                return this.baseAgility + 100;
+            }
+
+            // Add action value for one calculation
+            addActionValue() {
+                this.actionValue += this.getEffectiveAgility();
+            }
+
+            // Reset action value after acting
+            resetActionValue() {
+                this.actionValue = 0;
+                this.actionCount++;
+                // TODO: Implement buff/debuff duration decrement based on actionCount
+            }
+        }
+
+        // Function to generate unit input fields
+        function generateUnitInputs() {
+            const playerInputsDiv = document.getElementById('player-units');
+            const enemyInputsDiv = document.getElementById('enemy-units');
+
+            playerInputsDiv.innerHTML = '<h3>プレイヤーパーティ</h3>';
+            enemyInputsDiv.innerHTML = '<h3>敵パーティ</h3>';
+
+            for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
+                // Player Unit
+                playerInputsDiv.innerHTML += `
+                    <div class="unit-input">
+                        <label for="player-unit-${i}-name">ユニット ${i} (プレイヤー)</label>
+                        <input type="text" id="player-unit-${i}-name" value="プレイヤー ${i}">
+                        <label for="player-unit-${i}-agility">敏捷:</label>
+                        <input type="number" id="player-unit-${i}-agility" value="100" min="1">
+                    </div>
+                `;
+
+                // Enemy Unit
+                 enemyInputsDiv.innerHTML += `
+                    <div class="unit-input">
+                        <label for="enemy-unit-${i}-name">ユニット ${i} (敵)</label>
+                        <input type="text" id="enemy-unit-${i}-name" value="敵 ${i}">
+                        <label for="enemy-unit-${i}-agility">敏捷:</label>
+                        <input type="number" id="enemy-unit-${i}-agility" value="100" min="1">
+                    </div>
+                `;
+            }
+        }
+
+        // Function to get unit data from inputs
+        function getUnitsFromInputs() {
+            const units = [];
+            for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
+                // Player Unit
+                const playerNameInput = document.getElementById(`player-unit-${i}-name`);
+                const playerAgilityInput = document.getElementById(`player-unit-${i}-agility`);
+                if (playerAgilityInput && parseInt(playerAgilityInput.value) > 0) {
+                     units.push(new Unit(`player-${i}`, playerNameInput.value, parseInt(playerAgilityInput.value), 'player'));
+                }
+
+                // Enemy Unit
+                const enemyNameInput = document.getElementById(`enemy-unit-${i}-name`);
+                const enemyAgilityInput = document.getElementById(`enemy-unit-${i}-agility`);
+                 if (enemyAgilityInput && parseInt(enemyAgilityInput.value) > 0) {
+                    units.push(new Unit(`enemy-${i}`, enemyNameInput.value, parseInt(enemyAgilityInput.value), 'enemy'));
+                }
+            }
+            return units;
+        }
+
+        // Function to run the simulation
+        function runSimulation() {
+            const units = getUnitsFromInputs();
+            if (units.length === 0) {
+                alert('ユニットを1体以上設定してください。');
+                return;
+            }
+
+            const resultsTableBody = document.querySelector('#results-table tbody');
+            const resultsTableHeader = document.querySelector('#results-table thead tr');
+
+            // Clear previous results
+            resultsTableBody.innerHTML = '';
+            resultsTableHeader.innerHTML = '<th>演算</th>'; // Reset header
+
+            // Add unit headers to the table
+            units.forEach(unit => {
+                const th = document.createElement('th');
+                th.textContent = unit.name;
+                resultsTableHeader.appendChild(th);
+            });
+
+            // Simulation loop
+            for (let calc = 1; calc <= NUM_CALCULATIONS; calc++) {
+                const row = document.createElement('tr');
+                const calcCell = document.createElement('td');
+                calcCell.textContent = calc;
+                row.appendChild(calcCell);
+
+                // Add action value for this calculation
+                units.forEach(unit => {
+                    unit.addActionValue();
+                });
+
+                // Check for units that can act
+                let actingUnits = units.filter(unit => unit.actionValue >= ACTION_THRESHOLD);
+
+                // Sort acting units: higher action value first, then UI order
+                actingUnits.sort((a, b) => {
+                    if (b.actionValue !== a.actionValue) {
+                        return b.actionValue - a.actionValue; // Higher action value first
+                    }
+                    // If action values are equal, sort by original input order (implicit in units array order)
+                    // Find index in the original units array
+                    const aIndex = units.findIndex(unit => unit.id === a.id);
+                    const bIndex = units.findIndex(unit => unit.id === b.id);
+                    return aIndex - bIndex; // Earlier in the list first
+                });
+
+                // Process actions for acting units (in sorted order)
+                actingUnits.forEach(unit => {
+                    // This unit acts
+                    // TODO: Implement action value up/down immediate action logic here if needed
+                    unit.resetActionValue(); // Reset action value after acting
+                    // TODO: Implement buff/debuff duration decrement here
+                });
+
+
+                // Display results for this calculation
+                units.forEach(unit => {
+                    const cell = document.createElement('td');
+                    // Check if this unit acted in this calculation
+                    const didAct = actingUnits.some(actingUnit => actingUnit.id === unit.id);
+
+                    if (didAct) {
+                        cell.textContent = 'ACT'; // Indicate action
+                        cell.classList.add('action-cell');
+                    } else {
+                         cell.textContent = Math.floor(unit.actionValue); // Display current action value (floor just in case, should be integer)
+                    }
+                    row.appendChild(cell);
+                });
+
+                resultsTableBody.appendChild(row);
+            }
+        }
+
+        // Initialize unit input fields on page load
+        window.onload = generateUnitInputs;
+
+        // TODO: Add UI and logic for buffs/debuffs and action value up/down
+    </script>
+</body>
+</html>
