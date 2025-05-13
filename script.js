@@ -19,14 +19,13 @@ class Unit {
     }
 
     // Calculate effective agility based on active buffs/debuffs
-    getEffectiveAgility() {
+    getEffectiveAgility(currentCalc) { // Pass current calculation number
         let effectiveAgility = this.baseAgility;
         let skillBuffPercent = 0;
         let bbBuffPercent = 0;
         let heavyPressurePercent = 0; // Fixed -30%
 
         // Filter out expired buffs and apply active ones
-        // Note: Calculation-based buffs are removed immediately after application in the simulation loop
         this.activeBuffs = this.activeBuffs.filter(buff => {
              // Keep buffs that are calculation-based (they are removed when applied)
              // Or action-based buffs with remaining duration > 0
@@ -35,12 +34,15 @@ class Unit {
 
 
         this.activeBuffs.forEach(buff => {
-            if (buff.type === 'agility_buff_skill') {
-                skillBuffPercent = Math.max(skillBuffPercent, buff.value);
-            } else if (buff.type === 'agility_buff_bb') {
-                bbBuffPercent = Math.max(bbBuffPercent, buff.value);
-            } else if (buff.type === 'agility_debuff_heavy_pressure') {
-                heavyPressurePercent = -30; // Heavy pressure is always -30%
+            // Only apply agility buffs if the current calculation is >= the start calculation
+            if (currentCalc >= buff.startCalc) {
+                if (buff.type === 'agility_buff_skill') {
+                    skillBuffPercent = Math.max(skillBuffPercent, buff.value);
+                } else if (buff.type === 'agility_buff_bb') {
+                    bbBuffPercent = Math.max(bbBuffPercent, buff.value);
+                } else if (buff.type === 'agility_debuff_heavy_pressure') {
+                    heavyPressurePercent = -30; // Heavy pressure is always -30%
+                }
             }
             // Action value buffs/debuffs don't affect effective agility per calculation
         });
@@ -209,12 +211,14 @@ function updateBuffInputFields() {
         valueUnitSpan.textContent = '%';
         durationLabel.style.display = 'inline-block';
         durationInput.style.display = 'inline-block';
-        calcLabel.style.display = 'none';
-        calcInput.style.display = 'none';
+        // 付与演算は常に表示
+        calcLabel.style.display = 'inline-block';
+        calcInput.style.display = 'inline-block';
     } else { // action_value
         valueUnitSpan.textContent = ''; // No unit or maybe '+'
         durationLabel.style.display = 'none';
         durationInput.style.display = 'none';
+        // 付与演算は常に表示
         calcLabel.style.display = 'inline-block';
         calcInput.style.display = 'inline-block';
     }
@@ -276,9 +280,13 @@ function addBuffDebuff() {
     if (type.startsWith('agility')) {
         duration = parseInt(durationInput.value);
         durationType = 'action';
-        startCalc = 1; // Agility buffs are active from the calculation they are applied (assuming this based on previous discussion)
+        startCalc = parseInt(calcInput.value); // 敏捷バフも付与演算を設定可能に
          if (isNaN(duration) || duration <= 0) {
              alert('効果ターンを1以上の数値で入力してください。');
+             return;
+         }
+         if (isNaN(startCalc) || startCalc <= 0) { // 敏捷バフも付与演算の検証を追加
+             alert('付与演算を1以上の数値で入力してください。');
              return;
          }
     } else { // action_value
@@ -379,39 +387,41 @@ function runSimulation() {
 
         // --- Buff/Debuff Application (at the start of the calculation) ---
         // Identify buffs/debuffs that are applied in this calculation
-        const buffsToApplyThisCalc = simulationBuffs.filter(buff =>
-            buff.startCalc === calc && buff.remainingDuration > 0 // Check startCalc and if not already consumed in simulation
+        // This is for buffs/debuffs whose *application trigger* is the start of a specific calculation.
+        // Action-triggered buffs will be applied later in the action processing phase.
+        const calcTriggeredBuffsToApplyThisCalc = simulationBuffs.filter(buff =>
+            buff.durationType === 'calculation' && buff.startCalc === calc && buff.remainingDuration > 0 // Check startCalc and if not already consumed in simulation
         );
 
-        buffsToApplyThisCalc.forEach(buff => {
-            buff.targetUnitIds.forEach(targetId => {
-                const targetUnit = simulationUnits.find(unit => unit.id === targetId);
-                if (targetUnit) {
-                    // Create a unique instance of the buff for the target unit
-                    const buffInstance = JSON.parse(JSON.stringify(buff));
-                    buffInstance.remainingDuration = buff.duration; // Set initial duration
-                    // Record the action count of the target unit when the buff is applied
-                    buffInstance.appliedActionCount[targetUnit.id] = targetUnit.actionCount;
-                    targetUnit.activeBuffs.push(buffInstance);
+        calcTriggeredBuffsToApplyThisCalc.forEach(buff => {
+             buff.targetUnitIds.forEach(targetId => {
+                 const targetUnit = simulationUnits.find(unit => unit.id === targetId);
+                 if (targetUnit) {
+                     // Create a unique instance of the buff for the target unit
+                     const buffInstance = JSON.parse(JSON.stringify(buff));
+                     buffInstance.remainingDuration = buff.duration; // Set initial duration
+                      // Record the action count of the target unit when the buff is applied
+                     buffInstance.appliedActionCount[targetUnit.id] = targetUnit.actionCount;
+                     targetUnit.activeBuffs.push(buffInstance);
 
-                    if (buff.type.startsWith('action_value')) {
-                        // Apply action value change immediately for AV buffs
-                        targetUnit.addActionValue(buffInstance.value);
-                        // Action value buffs are consumed immediately after application
-                        buffInstance.remainingDuration = 0; // Mark instance as consumed
-                    }
-                     // For agility buffs, they are now in activeBuffs and affect getEffectiveAgility from this calc
-                }
-            });
-             // Mark the original buff in simulationBuffs as consumed for this run
-             buff.remainingDuration = 0; // This prevents it from being applied again in future calcs
-        });
+                     if (buffInstance.type.startsWith('action_value')) {
+                         // Apply action value change immediately for AV buffs
+                         targetUnit.addActionValue(buffInstance.value);
+                         // Action value buffs are consumed immediately after application
+                         buffInstance.remainingDuration = 0; // Mark instance as consumed
+                     }
+                      // For agility buffs, they are now in activeBuffs and affect getEffectiveAgility from this calc
+                 }
+             });
+              // Mark the original buff in simulationBuffs as consumed for this run
+              buff.remainingDuration = 0; // This prevents it from being applied again in future calcs
+         });
 
 
         // --- Action Value Gain (based on effective agility) ---
         simulationUnits.forEach(unit => {
-             // Add action value based on effective agility
-             unit.addActionValue(unit.getEffectiveAgility());
+             // Add action value based on effective agility, considering buffs active from this calculation
+             unit.addActionValue(unit.getEffectiveAgility(calc)); // Pass current calc to getEffectiveAgility
         });
 
         // --- Action Check and Processing ---
@@ -430,10 +440,40 @@ function runSimulation() {
         });
 
         // Process actions for acting units (in sorted order)
+        // This is where action-triggered buffs/debuffs are applied
+        let actionTriggeredBuffsToApplyAfterAction = []; // Collect buffs triggered by actions in this calc
+
         actingUnits.forEach(unit => {
             // This unit acts
             unit.resetActionValue(); // Store value before reset, reset AV, increment action count, decrement action-based buff durations
-            // Buff duration decrement for action-based buffs happens in resetActionValue
+
+            // --- Apply Action-Triggered Buffs/Debuffs (immediately after action) ---
+            // Identify buffs/debuffs that are triggered by *this unit's* action at *this calculation*
+            // This requires a way to link a buff definition to a unit's action.
+            // For now, we'll use the 'startCalc' property to indicate the calculation where the *triggering action* occurs.
+            // And the 'sourceUnitId' to identify the unit performing the action.
+            // This is a simplification; a full implementation would need a more robust trigger system.
+
+             const actionTriggeredBuffsFromThisUnit = simulationBuffs.filter(buff =>
+                 buff.durationType === 'action' && buff.startCalc === calc && buff.sourceUnitId === unit.id && buff.remainingDuration > 0 // Check trigger calc, source unit, and if not already consumed
+             );
+
+             actionTriggeredBuffsFromThisUnit.forEach(buff => {
+                 buff.targetUnitIds.forEach(targetId => {
+                     const targetUnit = simulationUnits.find(u => u.id === targetId);
+                     if (targetUnit) {
+                         // Create a unique instance of the buff for the target unit
+                         const buffInstance = JSON.parse(JSON.stringify(buff));
+                         buffInstance.remainingDuration = buff.duration; // Set initial duration
+                         // Record the action count of the target unit *after* the source unit's action
+                         // This is crucial for the "starts counting next action" logic
+                         buffInstance.appliedActionCount[targetUnit.id] = targetUnit.actionCount; // Use target's actionCount *after* source acts
+                         targetUnit.activeBuffs.push(buffInstance);
+                     }
+                 });
+                 // Mark the original action-triggered buff in simulationBuffs as consumed for this run
+                 buff.remainingDuration = 0; // Prevent it from being applied again
+             });
         });
 
         // --- Buff/Debuff Duration Check and Removal (after actions) ---
@@ -465,21 +505,21 @@ function runSimulation() {
                  cell.textContent = Math.floor(unit.actionValue); // Display current action value
             }
 
-            // Optional: Highlight cells where buffs/debuffs were applied in this calc
-            // We need to check the buffInstances that were added to units' activeBuffs in this calc
+            // Optional: Highlight cells where buffs/debuffs were applied *in this calculation*
+            // This includes both calculation-triggered and action-triggered buffs applied in this calc.
             const buffsAppliedToThisUnitInThisCalc = simulationUnits.find(u => u.id === unit.id)?.activeBuffs.filter(buff =>
-                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id) && buff.durationType === 'calculation' // Only highlight calculation-based buffs on application calc
+                 // Check if the buff instance was added in this specific calculation turn
+                 // A simple way is to check if its startCalc matches the current calc
+                 // This might over-highlight if a buff is applied and immediately expires within the same calc,
+                 // but for visual feedback on application timing, it's a reasonable approach.
+                 // A more accurate way would be to temporarily mark buffs applied in this calc.
+                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id)
             ) || [];
 
-             // Also check for action-based buffs applied in this calc
-             const actionBuffsAppliedToThisUnitInThisCalc = simulationBuffs.filter(buff =>
-                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id) && buff.durationType === 'action'
-             );
 
-
-            if (buffsAppliedToThisUnitInThisCalc.length > 0 || actionBuffsAppliedToThisUnitInThisCalc.length > 0) {
+            if (buffsAppliedToThisUnitInThisCalc.length > 0) {
                 // Determine if it was a buff or debuff for coloring
-                const isDebuff = buffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff')) || actionBuffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff'));
+                const isDebuff = buffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff'));
                 if (isDebuff) {
                      cell.classList.add('debuff-applied-cell');
                 } else {
