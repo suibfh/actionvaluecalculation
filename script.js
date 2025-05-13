@@ -346,7 +346,8 @@ function runSimulation() {
     }
 
     const resultsTableBody = document.querySelector('#results-table tbody');
-    const resultsTableHeader = document.querySelector('#results-table theable thead tr'); // Corrected selector
+    // Corrected selector: '#results-table theable thead tr' -> '#results-table thead tr'
+    const resultsTableHeader = document.querySelector('#results-table thead tr');
 
     // Clear previous results
     resultsTableBody.innerHTML = '';
