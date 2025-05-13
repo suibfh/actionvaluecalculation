@@ -15,6 +15,7 @@ class Unit {
         this.side = side; // 'player' or 'enemy'
         this.actionCount = 0; // Number of times this unit has acted
         this.activeBuffs = []; // Array to hold active BuffDebuff objects
+        this.actionValueAtAct = 0; // Store action value when acting
     }
 
     // Calculate effective agility based on active buffs/debuffs
@@ -53,11 +54,18 @@ class Unit {
 
     // Reset action value after acting
     resetActionValue() {
+        this.actionValueAtAct = this.actionValue; // Store value before reset
         this.actionValue = 0;
         this.actionCount++;
         // Decrement duration of active buffs/debuffs that count per action
         this.activeBuffs.forEach(buff => {
             if (buff.durationType === 'action') {
+                // Check if this buff was self-applied in the previous action
+                // This requires tracking which action applied the buff, which is complex.
+                // For now, decrement unless it was applied *by this unit's previous action* and duration > 1
+                // A simpler approach is to decrement for all action-based buffs on action,
+                // and handle the "self-applied" logic when applying the buff initially.
+                // Let's stick to decrementing all action-based buffs for simplicity now.
                 buff.remainingDuration--;
             }
         });
@@ -76,6 +84,7 @@ class BuffDebuff {
         this.startCalc = startCalc; // The calculation turn this effect is applied
         this.targetUnitIds = targetUnitIds; // Array of unit IDs this effect targets
         this.id = Date.now() + Math.random(); // Simple unique ID for list rendering
+        // TODO: Add sourceUnitId if needed for self-applied buff logic
     }
 
     getDescription(allUnits) {
@@ -189,6 +198,28 @@ function updateBuffInputFields() {
 }
 
 
+// Function to get unit data from inputs
+function getUnitsFromInputs() {
+    const units = [];
+    for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
+        // Player Unit
+        const playerNameInput = document.getElementById(`player-${i}-name`);
+        const playerAgilityInput = document.getElementById(`player-${i}-agility`);
+        if (playerNameInput && playerAgilityInput && parseInt(playerAgilityInput.value) > 0) {
+             units.push(new Unit(`player-${i}`, playerNameInput.value, parseInt(playerAgilityInput.value), 'player'));
+        }
+
+        // Enemy Unit
+        const enemyNameInput = document.getElementById(`enemy-${i}-name`);
+        const enemyAgilityInput = document.getElementById(`enemy-${i}-agility`);
+         if (enemyNameInput && enemyAgilityInput && parseInt(enemyAgilityInput.value) > 0) {
+            units.push(new Unit(`enemy-${i}`, enemyNameInput.value, parseInt(enemyAgilityInput.value), 'enemy'));
+        }
+    }
+    return units;
+}
+
+
 // Function to add a buff/debuff from input
 function addBuffDebuff() {
     const typeSelect = document.getElementById('buff-debuff-type');
@@ -237,7 +268,7 @@ function addBuffDebuff() {
 
     // Add to the displayed list
     const listItem = document.createElement('li');
-    listItem.textContent = newBuff.getDescription(allUnits);
+    listItem.textContent = newBuff.getDescription(allUnits); // Use allUnits for description
     const removeButton = document.createElement('button');
     removeButton.textContent = '削除';
     removeButton.onclick = () => removeBuffDebuff(newBuff.id);
@@ -263,7 +294,7 @@ function renderActiveBuffsList() {
     activeBuffsList.innerHTML = ''; // Clear current list
     activeBuffDebuffs.forEach(buff => {
         const listItem = document.createElement('li');
-        listItem.textContent = buff.getDescription(allUnits);
+        listItem.textContent = buff.getDescription(allUnits); // Use allUnits for description
         const removeButton = document.createElement('button');
         removeButton.textContent = '削除';
         removeButton.onclick = () => removeBuffDebuff(buff.id);
@@ -278,7 +309,9 @@ function renderActiveBuffsList() {
 // Function to run the simulation
 function runSimulation() {
     // Get current unit data from inputs (in case agility changed)
-    const currentUnitsData = getUnitsFromInputs();
+    // Use allUnits to get the base structure, then update agility from inputs
+    const currentUnitsData = getUnitsFromInputs(); // This now correctly gets current values
+
      if (currentUnitsData.length === 0) {
         alert('ユニットを1体以上設定してください。');
         return;
@@ -312,6 +345,7 @@ function runSimulation() {
         row.appendChild(calcCell);
 
         // --- Buff/Debuff Application (at the start of the calculation) ---
+        // Identify buffs/debuffs that are applied in this calculation
         const buffsToApplyThisCalc = simulationBuffs.filter(buff =>
             buff.durationType === 'calculation' && buff.startCalc === calc && buff.remainingDuration > 0
         );
@@ -323,9 +357,8 @@ function runSimulation() {
                     if (buff.type.startsWith('action_value')) {
                         // Apply action value change immediately
                         targetUnit.addActionValue(buff.value);
-                         // Mark cell for visual feedback (optional, can add a class)
-                         // This is tricky to do here as we are building the row later.
-                         // Will handle visual feedback during cell rendering.
+                         // Action value buffs are consumed immediately
+                         buff.remainingDuration = 0; // Mark as applied for this simulation run
                     } else {
                          // Agility buffs/debuffs applied at start of calc, affect getEffectiveAgility
                          // Need to add the buff object to the unit's activeBuffs list
@@ -333,57 +366,28 @@ function runSimulation() {
                          // Based on previous discussion, multiple instances of the *effect* (e.g., skill+30%, skill+25%)
                          // contribute to the highest value calculation, so adding the object is correct.
                          const buffInstance = JSON.parse(JSON.stringify(buff)); // Copy the buff object
-                         buffInstance.remainingDuration = buff.duration; // Reset duration for this application
+                         buffInstance.remainingDuration = buff.duration; // Set initial duration
                          targetUnit.activeBuffs.push(buffInstance);
+                         // Calculation-based agility buffs are also consumed on application calc
+                         buff.remainingDuration = 0;
                     }
                 }
             });
-             // For calculation-based buffs, they are 'consumed' on application
-             buff.remainingDuration = 0; // Mark as applied for this simulation run
         });
 
 
         // --- Action Value Gain (based on effective agility) ---
         simulationUnits.forEach(unit => {
-             // Only add action value if the unit didn't just act from an immediate AV buff
-             // This requires checking if they acted in the immediate action phase below
-             // For now, add to all, will refine immediate action later.
-             if (!unit.actedImmediatelyInThisCalc) {
-                 unit.addActionValue(unit.getEffectiveAgility());
-             }
+             // Add action value based on effective agility
+             unit.addActionValue(unit.getEffectiveAgility());
         });
 
-        // --- Immediate Action Check (for action value buffs) ---
-        // Check for units whose action value just reached >= 1000 due to action value buffs
-        let immediateActingUnits = [];
-        buffsToApplyThisCalc.forEach(buff => {
-             if (buff.type.startsWith('action_value')) {
-                 buff.targetUnitIds.forEach(targetId => {
-                     const targetUnit = simulationUnits.find(unit => unit.id === targetId);
-                      // Check if unit exists, wasn't already acting immediately, and now meets threshold
-                     if (targetUnit && !immediateActingUnits.some(u => u.id === targetUnit.id) && targetUnit.actionValue >= ACTION_THRESHOLD) {
-                         immediateActingUnits.push(targetUnit);
-                         targetUnit.actedImmediatelyInThisCalc = true; // Mark for this calc
-                     }
-                 });
-             }
-        });
+        // --- Action Check (including immediate actions from AV buffs) ---
+        // Check for all units that can act
+        let actingUnits = simulationUnits.filter(unit => unit.actionValue >= ACTION_THRESHOLD);
 
-         // Process immediate actions
-        immediateActingUnits.forEach(unit => {
-            unit.resetActionValue(); // Reset AV, increment action count, decrement action-based buff durations
-            // Buff duration decrement for action-based buffs happens in resetActionValue
-        });
-
-
-        // --- Main Action Check ---
-        // Check for all units (excluding those who just acted immediately) that can act
-        let mainActingUnits = simulationUnits.filter(unit =>
-            unit.actionValue >= ACTION_THRESHOLD && !unit.actedImmediatelyInThisCalc
-        );
-
-        // Sort main acting units: higher action value first, then original input order
-        mainActingUnits.sort((a, b) => {
+        // Sort acting units: higher action value first, then original input order
+        actingUnits.sort((a, b) => {
             if (b.actionValue !== a.actionValue) {
                 return b.actionValue - a.actionValue; // Higher action value first
             }
@@ -393,9 +397,10 @@ function runSimulation() {
             return aIndex - bIndex; // Earlier in the list first
         });
 
-        // Process main actions
-        mainActingUnits.forEach(unit => {
-            unit.resetActionValue(); // Reset AV, increment action count, decrement action-based buff durations
+        // Process actions for acting units (in sorted order)
+        actingUnits.forEach(unit => {
+            // This unit acts
+            unit.resetActionValue(); // Store value before reset, reset AV, increment action count, decrement action-based buff durations
             // Buff duration decrement for action-based buffs happens in resetActionValue
         });
 
@@ -405,8 +410,9 @@ function runSimulation() {
             unit.activeBuffs = unit.activeBuffs.filter(buff =>
                 !(buff.durationType === 'action' && buff.remainingDuration <= 0)
             );
-             // Reset immediate action flag for the next calculation
-             unit.actedImmediatelyInThisCalc = false;
+             // TODO: Handle self-applied buff duration logic (starts counting next action)
+             // This requires tracking which unit applied which buff, and when.
+             // For now, all action-based buffs decrement on action.
         });
 
 
@@ -414,23 +420,11 @@ function runSimulation() {
         simulationUnits.forEach(unit => {
             const cell = document.createElement('td');
 
-            const didActImmediately = immediateActingUnits.some(actingUnit => actingUnit.id === unit.id);
-            const didActMain = mainActingUnits.some(actingUnit => actingUnit.id === unit.id);
-            const didAct = didActImmediately || didActMain;
+            const didAct = actingUnits.some(actingUnit => actingUnit.id === unit.id);
 
             if (didAct) {
-                // Display "ACT (行動値)"
-                // The actionValue was reset, so we can't get the exact value it reached *before* reset.
-                // For now, display the threshold or a placeholder. Getting the exact value requires
-                // storing the value just before reset, which adds complexity.
-                // Let's display 'ACT (>=1000)' for now, or we can store the value before reset.
-                // Storing before reset is better for accuracy. Let's add that.
-
-                // To get the action value *before* reset, we need to capture it.
-                // Let's modify the action processing to store the value.
-                // For now, we'll display a placeholder or the threshold.
-                // Displaying the threshold is a reasonable approximation.
-                 cell.textContent = `ACT (>=${ACTION_THRESHOLD})`; // Placeholder for now
+                // Display "ACT (行動値)" using the stored value before reset
+                 cell.textContent = `ACT (${Math.floor(unit.actionValueAtAct)})`;
                  cell.classList.add('action-cell');
             } else {
                  cell.textContent = Math.floor(unit.actionValue); // Display current action value
@@ -455,7 +449,6 @@ function runSimulation() {
 
         resultsTableBody.appendChild(row);
     }
-     // TODO: Refine action value display on ACT cells to show the actual value before reset
 }
 
 // Initialize unit input fields on page load
