@@ -25,6 +25,14 @@ class Unit {
         let bbBuffPercent = 0;
         let heavyPressurePercent = 0; // Fixed -30%
 
+        // Filter out expired buffs and apply active ones
+        this.activeBuffs = this.activeBuffs.filter(buff => {
+             // Keep buffs that are calculation-based (they are removed when applied)
+             // Or action-based buffs with remaining duration > 0
+             return buff.durationType === 'calculation' || buff.remainingDuration > 0;
+        });
+
+
         this.activeBuffs.forEach(buff => {
             if (buff.type === 'agility_buff_skill') {
                 skillBuffPercent = Math.max(skillBuffPercent, buff.value);
@@ -44,7 +52,7 @@ class Unit {
 
         // Agility must be at least 1 (or some minimum game value if known)
         // Assuming it cannot go below 1 for calculation purposes
-        return Math.max(1, effectiveAgility + 100); // Add the base 100 action value gain
+        return Math.max(1, effectiveAgility) + 100; // Add the base 100 action value gain
     }
 
     // Add action value for one calculation
@@ -60,22 +68,20 @@ class Unit {
         // Decrement duration of active buffs/debuffs that count per action
         this.activeBuffs.forEach(buff => {
             if (buff.durationType === 'action') {
-                // Check if this buff was self-applied in the previous action
-                // This requires tracking which action applied the buff, which is complex.
-                // For now, decrement unless it was applied *by this unit's previous action* and duration > 1
-                // A simpler approach is to decrement for all action-based buffs on action,
-                // and handle the "self-applied" logic when applying the buff initially.
-                // Let's stick to decrementing all action-based buffs for simplicity now.
-                buff.remainingDuration--;
+                // Decrement duration ONLY if the action count is greater than the action count when the buff was applied
+                // This handles the self-applied buff logic (starts counting next action)
+                if (this.actionCount > buff.appliedActionCount[this.id]) {
+                     buff.remainingDuration--;
+                }
             }
         });
-        // Remove expired buffs/debuffs (will be handled in the main simulation loop after processing actions)
+        // Removal of expired buffs happens in getEffectiveAgility or main simulation loop
     }
 }
 
 // Represents a buff or debuff effect
 class BuffDebuff {
-    constructor(type, value, duration, durationType, startCalc, targetUnitIds) {
+    constructor(type, value, duration, durationType, startCalc, targetUnitIds, sourceUnitId = null) {
         this.type = type; // 'agility_buff_skill', 'agility_buff_bb', 'agility_debuff_heavy_pressure', 'action_value_up', 'action_value_down'
         this.value = value; // Percentage for agility, fixed value for action value
         this.duration = duration; // Total duration (in actions or calculations)
@@ -84,7 +90,8 @@ class BuffDebuff {
         this.startCalc = startCalc; // The calculation turn this effect is applied
         this.targetUnitIds = targetUnitIds; // Array of unit IDs this effect targets
         this.id = Date.now() + Math.random(); // Simple unique ID for list rendering
-        // TODO: Add sourceUnitId if needed for self-applied buff logic
+        this.sourceUnitId = sourceUnitId; // ID of the unit that applied this buff (null if not applicable)
+        this.appliedActionCount = {}; // Track action count when applied for each target unit (key: unitId, value: actionCount)
     }
 
     getDescription(allUnits) {
@@ -95,16 +102,18 @@ class BuffDebuff {
 
         let effectDesc = '';
         let durationDesc = '';
+        let sourceDesc = this.sourceUnitId ? ` (付与元: ${allUnits.find(u => u.id === this.sourceUnitId)?.name || '不明'})` : '';
+
 
         if (this.type.startsWith('agility')) {
-            effectDesc = `敏捷 ${this.value}% ${this.type.includes('buff') ? 'アップ' : 'ダウン'}`;
+            effectDesc = `敏捷 ${this.value}% ${this.value >= 0 ? 'アップ' : 'ダウン'}`; // Use value sign for description
             durationDesc = `(${this.duration} 行動)`;
         } else { // action_value
              effectDesc = `行動値 ${this.value > 0 ? '+' : ''}${this.value}`;
              durationDesc = `(演算 ${this.startCalc} で付与)`;
         }
 
-        return `${effectDesc} 対象: ${targetNames} ${durationDesc}`;
+        return `${effectDesc} 対象: ${targetNames}${sourceDesc} ${durationDesc}`;
     }
 }
 
@@ -115,20 +124,22 @@ let activeBuffDebuffs = []; // Array of BuffDebuff objects added by the user
 
 // --- UI Generation ---
 
-// Function to generate unit input fields
+// Function to generate unit input fields and target/source checkboxes/selects
 function generateUnitInputs() {
     const playerInputsDiv = document.getElementById('player-units');
     const enemyInputsDiv = document.getElementById('enemy-units');
     const targetUnitsDiv = document.getElementById('buff-debuff-target-units');
+    const sourceUnitSelect = document.getElementById('buff-debuff-source');
 
     playerInputsDiv.innerHTML = '<h3>プレイヤーパーティ</h3>';
     enemyInputsDiv.innerHTML = '<h3>敵パーティ</h3>';
     targetUnitsDiv.innerHTML = ''; // Clear previous targets
+    sourceUnitSelect.innerHTML = '<option value="">なし (敵など)</option>'; // Reset source options
 
     allUnits = []; // Clear previous units
 
+    // Generate Player Unit Inputs and add to allUnits
     for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
-        // Player Unit
         const playerId = `player-${i}`;
         playerInputsDiv.innerHTML += `
             <div class="unit-input">
@@ -138,11 +149,14 @@ function generateUnitInputs() {
                 <input type="number" id="${playerId}-agility" value="100" min="1">
             </div>
         `;
-         // Add to allUnits list for target selection
-        allUnits.push(new Unit(playerId, `プレイヤー ${i}`, 100, 'player'));
+        const unit = new Unit(playerId, `プレイヤー ${i}`, 100, 'player');
+        allUnits.push(unit);
+         // Add to source unit select
+        sourceUnitSelect.innerHTML += `<option value="${unit.id}">${unit.name}</option>`;
+    }
 
-
-        // Enemy Unit
+    // Generate Enemy Unit Inputs and add to allUnits
+     for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
         const enemyId = `enemy-${i}`;
          enemyInputsDiv.innerHTML += `
             <div class="unit-input">
@@ -152,11 +166,13 @@ function generateUnitInputs() {
                 <input type="number" id="${enemyId}-agility" value="100" min="1">
             </div>
         `;
-         // Add to allUnits list for target selection
-        allUnits.push(new Unit(enemyId, `敵 ${i}`, 100, 'enemy'));
+        const unit = new Unit(enemyId, `敵 ${i}`, 100, 'enemy');
+        allUnits.push(unit);
+        // Add to source unit select
+        sourceUnitSelect.innerHTML += `<option value="${unit.id}">${unit.name}</option>`;
     }
 
-    // Generate target unit checkboxes
+    // Generate target unit checkboxes based on the order in allUnits
     allUnits.forEach(unit => {
         targetUnitsDiv.innerHTML += `
             <div>
@@ -203,17 +219,19 @@ function getUnitsFromInputs() {
     const units = [];
     for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
         // Player Unit
-        const playerNameInput = document.getElementById(`player-${i}-name`);
-        const playerAgilityInput = document.getElementById(`player-${i}-agility`);
+        const playerId = `player-${i}`;
+        const playerNameInput = document.getElementById(`${playerId}-name`);
+        const playerAgilityInput = document.getElementById(`${playerId}-agility`);
         if (playerNameInput && playerAgilityInput && parseInt(playerAgilityInput.value) > 0) {
-             units.push(new Unit(`player-${i}`, playerNameInput.value, parseInt(playerAgilityInput.value), 'player'));
+             units.push(new Unit(playerId, playerNameInput.value, parseInt(playerAgilityInput.value), 'player'));
         }
 
         // Enemy Unit
-        const enemyNameInput = document.getElementById(`enemy-${i}-name`);
-        const enemyAgilityInput = document.getElementById(`enemy-${i}-agility`);
+        const enemyId = `enemy-${i}`;
+        const enemyNameInput = document.getElementById(`${enemyId}-name`);
+        const enemyAgilityInput = document.getElementById(`${enemyId}-agility`);
          if (enemyNameInput && enemyAgilityInput && parseInt(enemyAgilityInput.value) > 0) {
-            units.push(new Unit(`enemy-${i}`, enemyNameInput.value, parseInt(enemyAgilityInput.value), 'enemy'));
+            units.push(new Unit(enemyId, enemyNameInput.value, parseInt(enemyAgilityInput.value), 'enemy'));
         }
     }
     return units;
@@ -228,10 +246,13 @@ function addBuffDebuff() {
     const calcInput = document.querySelector('.calc-input');
     const targetCheckboxes = document.querySelectorAll('#buff-debuff-target-units input[type="checkbox"]:checked');
     const activeBuffsList = document.getElementById('active-buff-debuffs');
+    const sourceUnitSelect = document.getElementById('buff-debuff-source');
+
 
     const type = typeSelect.value;
     const value = parseInt(valueInput.value);
     const targetUnitIds = Array.from(targetCheckboxes).map(cb => cb.value);
+    const sourceUnitId = sourceUnitSelect.value || null; // Get selected source unit ID
 
     if (targetUnitIds.length === 0) {
         alert('対象ユニットを1体以上選択してください。');
@@ -263,7 +284,7 @@ function addBuffDebuff() {
          }
     }
 
-    const newBuff = new BuffDebuff(type, value, duration, durationType, startCalc, targetUnitIds);
+    const newBuff = new BuffDebuff(type, value, duration, durationType, startCalc, targetUnitIds, sourceUnitId);
     activeBuffDebuffs.push(newBuff);
 
     // Add to the displayed list
@@ -280,6 +301,7 @@ function addBuffDebuff() {
     // durationInput.value = '1';
     // calcInput.value = '1';
     // targetCheckboxes.forEach(cb => cb.checked = false);
+    // sourceUnitSelect.value = '';
 }
 
 // Function to remove a buff/debuff
@@ -309,8 +331,7 @@ function renderActiveBuffsList() {
 // Function to run the simulation
 function runSimulation() {
     // Get current unit data from inputs (in case agility changed)
-    // Use allUnits to get the base structure, then update agility from inputs
-    const currentUnitsData = getUnitsFromInputs(); // This now correctly gets current values
+    const currentUnitsData = getUnitsFromInputs();
 
      if (currentUnitsData.length === 0) {
         alert('ユニットを1体以上設定してください。');
@@ -335,8 +356,16 @@ function runSimulation() {
     // Create simulation units based on current input data
     const simulationUnits = currentUnitsData.map(unitData => new Unit(unitData.id, unitData.name, unitData.baseAgility, unitData.side));
 
-    // Create a copy of active buffs/debuffs for the simulation
-    const simulationBuffs = JSON.parse(JSON.stringify(activeBuffDebuffs)); // Simple deep copy
+    // Create a deep copy of active buffs/debuffs for the simulation
+    // Ensure appliedActionCount is also copied
+    const simulationBuffs = JSON.parse(JSON.stringify(activeBuffDebuffs));
+     // Re-initialize appliedActionCount as an empty object for the simulation copy
+     simulationBuffs.forEach(buff => {
+         buff.appliedActionCount = {};
+         // Ensure remainingDuration is reset to full duration at the start of simulation
+         buff.remainingDuration = buff.duration;
+     });
+
 
     for (let calc = 1; calc <= NUM_CALCULATIONS; calc++) {
         const row = document.createElement('tr');
@@ -347,32 +376,33 @@ function runSimulation() {
         // --- Buff/Debuff Application (at the start of the calculation) ---
         // Identify buffs/debuffs that are applied in this calculation
         const buffsToApplyThisCalc = simulationBuffs.filter(buff =>
-            buff.durationType === 'calculation' && buff.startCalc === calc && buff.remainingDuration > 0
+            buff.startCalc === calc && buff.remainingDuration > 0 // Check startCalc and if not already consumed
         );
 
         buffsToApplyThisCalc.forEach(buff => {
             buff.targetUnitIds.forEach(targetId => {
                 const targetUnit = simulationUnits.find(unit => unit.id === targetId);
                 if (targetUnit) {
+                    // Create a unique instance of the buff for the target unit
+                    const buffInstance = JSON.parse(JSON.stringify(buff));
+                    buffInstance.remainingDuration = buff.duration; // Set initial duration
+                    // Record the action count of the target unit when the buff is applied
+                    buffInstance.appliedActionCount[targetUnit.id] = targetUnit.actionCount;
+                    targetUnit.activeBuffs.push(buffInstance);
+
                     if (buff.type.startsWith('action_value')) {
-                        // Apply action value change immediately
-                        targetUnit.addActionValue(buff.value);
-                         // Action value buffs are consumed immediately
-                         buff.remainingDuration = 0; // Mark as applied for this simulation run
-                    } else {
-                         // Agility buffs/debuffs applied at start of calc, affect getEffectiveAgility
-                         // Need to add the buff object to the unit's activeBuffs list
-                         // Check if a similar buff instance already exists? Or allow multiple instances?
-                         // Based on previous discussion, multiple instances of the *effect* (e.g., skill+30%, skill+25%)
-                         // contribute to the highest value calculation, so adding the object is correct.
-                         const buffInstance = JSON.parse(JSON.stringify(buff)); // Copy the buff object
-                         buffInstance.remainingDuration = buff.duration; // Set initial duration
-                         targetUnit.activeBuffs.push(buffInstance);
-                         // Calculation-based agility buffs are also consumed on application calc
-                         buff.remainingDuration = 0;
+                        // Apply action value change immediately for AV buffs
+                        targetUnit.addActionValue(buffInstance.value);
+                        // Action value buffs are consumed immediately after application
+                        // We can mark the instance as consumed or rely on remainingDuration = 0
+                        // Let's set remainingDuration to 0 for instant buffs after application
+                        buffInstance.remainingDuration = 0;
                     }
+                     // For agility buffs, they are now in activeBuffs and affect getEffectiveAgility from this calc
                 }
             });
+             // Mark the original buff in simulationBuffs as consumed for this run
+             buff.remainingDuration = 0; // This prevents it from being applied again in future calcs
         });
 
 
@@ -382,8 +412,8 @@ function runSimulation() {
              unit.addActionValue(unit.getEffectiveAgility());
         });
 
-        // --- Action Check (including immediate actions from AV buffs) ---
-        // Check for all units that can act
+        // --- Action Check and Processing ---
+        // Check for all units that can act (>= 1000 AV)
         let actingUnits = simulationUnits.filter(unit => unit.actionValue >= ACTION_THRESHOLD);
 
         // Sort acting units: higher action value first, then original input order
@@ -404,15 +434,13 @@ function runSimulation() {
             // Buff duration decrement for action-based buffs happens in resetActionValue
         });
 
-        // --- Buff/Debuff Duration Check (after actions) ---
+        // --- Buff/Debuff Duration Check and Removal (after actions) ---
         simulationUnits.forEach(unit => {
-            // Remove expired action-based buffs/debuffs
-            unit.activeBuffs = unit.activeBuffs.filter(buff =>
-                !(buff.durationType === 'action' && buff.remainingDuration <= 0)
-            );
-             // TODO: Handle self-applied buff duration logic (starts counting next action)
-             // This requires tracking which unit applied which buff, and when.
-             // For now, all action-based buffs decrement on action.
+            // Remove expired action-based buffs/debuffs from the unit's active list
+            unit.activeBuffs = unit.activeBuffs.filter(buff => {
+                 // Keep the buff if it's calculation-based (already handled) or action-based with remaining duration > 0
+                 return buff.durationType === 'calculation' || buff.remainingDuration > 0;
+             });
         });
 
 
@@ -431,10 +459,15 @@ function runSimulation() {
             }
 
             // Optional: Highlight cells where buffs/debuffs were applied in this calc
-            const buffsAppliedHere = buffsToApplyThisCalc.some(buff => buff.targetUnitIds.includes(unit.id));
-            if (buffsAppliedHere) {
+            // We need to check the buffInstances that were added to units' activeBuffs in this calc
+            const buffsAppliedToThisUnitInThisCalc = simulationUnits.find(u => u.id === unit.id)?.activeBuffs.filter(buff =>
+                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id)
+            ) || [];
+
+
+            if (buffsAppliedToThisUnitInThisCalc.length > 0) {
                 // Determine if it was a buff or debuff for coloring
-                const isDebuff = buffsToApplyThisCalc.some(buff => buff.targetUnitIds.includes(unit.id) && buff.type.includes('debuff'));
+                const isDebuff = buffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff'));
                 if (isDebuff) {
                      cell.classList.add('debuff-applied-cell');
                 } else {
