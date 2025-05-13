@@ -450,9 +450,9 @@ function runSimulation() {
         // --- Display Results for this Calculation ---
         // Ensure cells are added in the correct order matching the table header
         // Create an array to hold the cells for this row in the correct order
-        const rowCells = [];
-        currentUnitsData.forEach(unitData => { // Iterate based on the original order
-             const unit = simulationUnits.find(u => u.id === unitData.id); // Find the corresponding simulation unit
+        const rowCells = Array(simulationUnits.length).fill(null); // Initialize with nulls
+
+        simulationUnits.forEach(unit => { // Iterate through simulation units
              const cell = document.createElement('td');
 
             const didAct = actingUnits.some(actingUnit => actingUnit.id === unit.id);
@@ -488,12 +488,21 @@ function runSimulation() {
                  // Add tooltip or text indicating which buff/debuff was applied? Can be complex.
             }
 
-            // Add the created cell to the rowCells array
-            rowCells.push(cell);
+            // Find the index of this unit in the desired order (currentUnitsData order)
+            const unitIndex = currentUnitsData.findIndex(unitData => unitData.id === unit.id);
+            if (unitIndex !== -1) {
+                 rowCells[unitIndex] = cell; // Place the created cell at the correct index
+            } else {
+                 console.error(`Error: Unit with ID ${unit.id} not found in original data.`);
+            }
         });
 
-        // Append all cells from the rowCells array to the row
-        rowCells.forEach(cell => row.appendChild(cell));
+        // Append all cells from the rowCells array to the row in their correct order
+        rowCells.forEach(cell => {
+            if (cell) { // Ensure cell was successfully created
+                row.appendChild(cell);
+            }
+        });
 
         resultsTableBody.appendChild(row);
     }
