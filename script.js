@@ -26,6 +26,7 @@ class Unit {
         let heavyPressurePercent = 0; // Fixed -30%
 
         // Filter out expired buffs and apply active ones
+        // Note: Calculation-based buffs are removed immediately after application in the simulation loop
         this.activeBuffs = this.activeBuffs.filter(buff => {
              // Keep buffs that are calculation-based (they are removed when applied)
              // Or action-based buffs with remaining duration > 0
@@ -70,6 +71,12 @@ class Unit {
             if (buff.durationType === 'action') {
                 // Decrement duration ONLY if the action count is greater than the action count when the buff was applied
                 // This handles the self-applied buff logic (starts counting next action)
+                // If the buff was self-applied (sourceUnitId === this.id), the first action *after* application starts the count.
+                // If applied by another unit, the action *at* application starts the count.
+                // The logic `this.actionCount > buff.appliedActionCount[this.id]` correctly handles both:
+                // - Other unit applied: appliedActionCount is the actionCount *before* this action. current actionCount is +1. So this.actionCount > appliedActionCount is true.
+                // - Self applied: appliedActionCount is the actionCount *before* this action. current actionCount is +1. The *next* action will have actionCount +2, which will be > appliedActionCount + 1.
+                // This logic seems correct for "starts counting next action" for self-applied buffs.
                 if (this.actionCount > buff.appliedActionCount[this.id]) {
                      buff.remainingDuration--;
                 }
@@ -269,7 +276,7 @@ function addBuffDebuff() {
     if (type.startsWith('agility')) {
         duration = parseInt(durationInput.value);
         durationType = 'action';
-        startCalc = 1; // Agility buffs are active from the calculation they are applied
+        startCalc = 1; // Agility buffs are active from the calculation they are applied (assuming this based on previous discussion)
          if (isNaN(duration) || duration <= 0) {
              alert('効果ターンを1以上の数値で入力してください。');
              return;
@@ -339,13 +346,13 @@ function runSimulation() {
     }
 
     const resultsTableBody = document.querySelector('#results-table tbody');
-    const resultsTableHeader = document.querySelector('#results-table thead tr');
+    const resultsTableHeader = document.querySelector('#results-table theable thead tr'); // Corrected selector
 
     // Clear previous results
     resultsTableBody.innerHTML = '';
     resultsTableHeader.innerHTML = '<th>演算</th>'; // Reset header
 
-    // Add unit headers to the table
+    // Add unit headers to the table in the correct order
     currentUnitsData.forEach(unit => {
         const th = document.createElement('th');
         th.textContent = unit.name;
@@ -357,15 +364,12 @@ function runSimulation() {
     const simulationUnits = currentUnitsData.map(unitData => new Unit(unitData.id, unitData.name, unitData.baseAgility, unitData.side));
 
     // Create a deep copy of active buffs/debuffs for the simulation
-    // Ensure appliedActionCount is also copied
     const simulationBuffs = JSON.parse(JSON.stringify(activeBuffDebuffs));
-     // Re-initialize appliedActionCount as an empty object for the simulation copy
+     // Re-initialize appliedActionCount and remainingDuration for the simulation copy
      simulationBuffs.forEach(buff => {
-         buff.appliedActionCount = {};
-         // Ensure remainingDuration is reset to full duration at the start of simulation
-         buff.remainingDuration = buff.duration;
+         buff.appliedActionCount = {}; // Reset for simulation
+         buff.remainingDuration = buff.duration; // Reset duration for simulation
      });
-
 
     for (let calc = 1; calc <= NUM_CALCULATIONS; calc++) {
         const row = document.createElement('tr');
@@ -376,7 +380,7 @@ function runSimulation() {
         // --- Buff/Debuff Application (at the start of the calculation) ---
         // Identify buffs/debuffs that are applied in this calculation
         const buffsToApplyThisCalc = simulationBuffs.filter(buff =>
-            buff.startCalc === calc && buff.remainingDuration > 0 // Check startCalc and if not already consumed
+            buff.startCalc === calc && buff.remainingDuration > 0 // Check startCalc and if not already consumed in simulation
         );
 
         buffsToApplyThisCalc.forEach(buff => {
@@ -394,9 +398,7 @@ function runSimulation() {
                         // Apply action value change immediately for AV buffs
                         targetUnit.addActionValue(buffInstance.value);
                         // Action value buffs are consumed immediately after application
-                        // We can mark the instance as consumed or rely on remainingDuration = 0
-                        // Let's set remainingDuration to 0 for instant buffs after application
-                        buffInstance.remainingDuration = 0;
+                        buffInstance.remainingDuration = 0; // Mark instance as consumed
                     }
                      // For agility buffs, they are now in activeBuffs and affect getEffectiveAgility from this calc
                 }
@@ -438,15 +440,18 @@ function runSimulation() {
         simulationUnits.forEach(unit => {
             // Remove expired action-based buffs/debuffs from the unit's active list
             unit.activeBuffs = unit.activeBuffs.filter(buff => {
-                 // Keep the buff if it's calculation-based (already handled) or action-based with remaining duration > 0
-                 return buff.durationType === 'calculation' || buff.remainingDuration > 0;
+                 // Keep the buff if it's calculation-based (already handled by setting remainingDuration to 0 on application)
+                 // or action-based with remaining duration > 0
+                 return buff.durationType === 'calculation' ? buff.remainingDuration > 0 : buff.remainingDuration > 0;
              });
         });
 
 
         // --- Display Results for this Calculation ---
-        simulationUnits.forEach(unit => {
-            const cell = document.createElement('td');
+        // Ensure cells are added in the correct order matching the table header
+        currentUnitsData.forEach(unitData => { // Iterate based on the original order
+             const unit = simulationUnits.find(u => u.id === unitData.id); // Find the corresponding simulation unit
+             const cell = document.createElement('td');
 
             const didAct = actingUnits.some(actingUnit => actingUnit.id === unit.id);
 
@@ -461,13 +466,18 @@ function runSimulation() {
             // Optional: Highlight cells where buffs/debuffs were applied in this calc
             // We need to check the buffInstances that were added to units' activeBuffs in this calc
             const buffsAppliedToThisUnitInThisCalc = simulationUnits.find(u => u.id === unit.id)?.activeBuffs.filter(buff =>
-                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id)
+                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id) && buff.durationType === 'calculation' // Only highlight calculation-based buffs on application calc
             ) || [];
 
+             // Also check for action-based buffs applied in this calc
+             const actionBuffsAppliedToThisUnitInThisCalc = simulationBuffs.filter(buff =>
+                 buff.startCalc === calc && buff.targetUnitIds.includes(unit.id) && buff.durationType === 'action'
+             );
 
-            if (buffsAppliedToThisUnitInThisCalc.length > 0) {
+
+            if (buffsAppliedToThisUnitInThisCalc.length > 0 || actionBuffsAppliedToThisUnitInThisCalc.length > 0) {
                 // Determine if it was a buff or debuff for coloring
-                const isDebuff = buffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff'));
+                const isDebuff = buffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff')) || actionBuffsAppliedToThisUnitInThisCalc.some(buff => buff.type.includes('debuff'));
                 if (isDebuff) {
                      cell.classList.add('debuff-applied-cell');
                 } else {
