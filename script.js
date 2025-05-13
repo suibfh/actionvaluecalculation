@@ -30,7 +30,7 @@ class Unit {
         this.activeBuffs = this.activeBuffs.filter(buff => {
              // Keep buffs that are calculation-based (they are removed when applied)
              // Or action-based buffs with remaining duration > 0
-             return buff.durationType === 'calculation' || buff.remainingDuration > 0;
+             return buff.durationType === 'calculation' ? buff.remainingDuration > 0 : buff.remainingDuration > 0;
         });
 
 
@@ -77,7 +77,7 @@ class Unit {
                 // - Other unit applied: appliedActionCount is the actionCount *before* this action. current actionCount is +1. So this.actionCount > appliedActionCount is true.
                 // - Self applied: appliedActionCount is the actionCount *before* this action. current actionCount is +1. The *next* action will have actionCount +2, which will be > appliedActionCount + 1.
                 // This logic seems correct for "starts counting next action" for self-applied buffs.
-                if (this.actionCount > buff.appliedActionCount[this.id]) {
+                if (this.actionCount > (buff.appliedActionCount[this.id] || 0)) { // Use || 0 for safety if appliedActionCount wasn't set
                      buff.remainingDuration--;
                 }
             }
@@ -346,7 +346,6 @@ function runSimulation() {
     }
 
     const resultsTableBody = document.querySelector('#results-table tbody');
-    // Corrected selector: '#results-table theable thead tr' -> '#results-table thead tr'
     const resultsTableHeader = document.querySelector('#results-table thead tr');
 
     // Clear previous results
@@ -450,6 +449,8 @@ function runSimulation() {
 
         // --- Display Results for this Calculation ---
         // Ensure cells are added in the correct order matching the table header
+        // Create an array to hold the cells for this row in the correct order
+        const rowCells = [];
         currentUnitsData.forEach(unitData => { // Iterate based on the original order
              const unit = simulationUnits.find(u => u.id === unitData.id); // Find the corresponding simulation unit
              const cell = document.createElement('td');
@@ -487,9 +488,12 @@ function runSimulation() {
                  // Add tooltip or text indicating which buff/debuff was applied? Can be complex.
             }
 
-
-            row.appendChild(cell);
+            // Add the created cell to the rowCells array
+            rowCells.push(cell);
         });
+
+        // Append all cells from the rowCells array to the row
+        rowCells.forEach(cell => row.appendChild(cell));
 
         resultsTableBody.appendChild(row);
     }
