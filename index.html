@@ -16,6 +16,40 @@
                 </div>
              <div class="unit-inputs" id="enemy-units">
                 </div>
+
+            <h2>バフ・デバフ設定</h2>
+            <div class="buff-debuff-inputs">
+                <div class="buff-debuff-control">
+                    <label for="buff-debuff-type">種類:</label>
+                    <select id="buff-debuff-type">
+                        <option value="agility_buff_skill">敏捷バフ (スキル)</option>
+                        <option value="agility_buff_bb">敏捷バフ (BB)</option>
+                        <option value="agility_debuff_heavy_pressure">敏捷デバフ (重圧)</option>
+                        <option value="action_value_up">行動値アップ</option>
+                        <option value="action_value_down">行動値ダウン</option>
+                    </select>
+
+                    <label for="buff-debuff-value">効果値:</label>
+                    <input type="number" id="buff-debuff-value" value="0">
+                    <span id="value-unit">%</span> <label for="buff-debuff-duration" class="duration-label">効果ターン:</label>
+                    <input type="number" id="buff-debuff-duration" value="1" min="1" class="duration-input">
+
+                     <label for="buff-debuff-calc" class="calc-label" style="display: none;">付与演算:</label>
+                    <input type="number" id="buff-debuff-calc" value="1" min="1" class="calc-input" style="display: none;">
+
+                </div>
+                 <div class="buff-debuff-targets">
+                    <label>対象ユニット:</label><br>
+                    <div id="buff-debuff-target-units">
+                        </div>
+                </div>
+                <button onclick="addBuffDebuff()">バフ・デバフ追加</button>
+            </div>
+
+            <h3>設定済みバフ・デバフ</h3>
+            <ul id="active-buff-debuffs">
+                </ul>
+
             <button onclick="runSimulation()">シミュレーション実行</button>
         </div>
 

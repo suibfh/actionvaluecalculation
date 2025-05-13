@@ -14,7 +14,7 @@ body {
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
-h1, h2 {
+h1, h2, h3 {
     color: #0056b3;
     border-bottom: 2px solid #0056b3;
     padding-bottom: 5px;
@@ -47,6 +47,69 @@ h1, h2 {
     border: 1px solid #ccc;
     border-radius: 4px;
 }
+
+.buff-debuff-inputs {
+    border: 1px solid #ccc;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    background-color: #e9e9e9;
+}
+
+.buff-debuff-control div, .buff-debuff-targets div {
+    margin-bottom: 10px;
+}
+
+.buff-debuff-control label, .buff-debuff-targets label {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.buff-debuff-control select, .buff-debuff-control input[type="number"] {
+     padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-right: 10px;
+}
+
+.buff-debuff-targets div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.buff-debuff-targets label {
+    font-weight: normal; /* Reset bold for individual unit labels */
+}
+
+#active-buff-debuffs {
+    list-style: none;
+    padding: 0;
+    margin-bottom: 15px;
+}
+
+#active-buff-debuffs li {
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    padding: 10px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#active-buff-debuffs li button {
+    background-color: #dc3545; /* Red for remove button */
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+#active-buff-debuffs li button:hover {
+     background-color: #c82333;
+}
+
+
 button {
     display: inline-block;
     background-color: #007bff;
@@ -86,6 +149,17 @@ tbody tr:nth-child(even) {
     color: white;
     font-weight: bold;
 }
+
+.buff-applied-cell {
+    background-color: #ffc107; /* Yellow for buff applied */
+    color: #333;
+}
+
+.debuff-applied-cell {
+     background-color: #dc3545; /* Red for debuff applied */
+     color: white;
+}
+
 .results-table-container {
     max-height: 400px; /* Limit height for scrolling */
     overflow-y: auto;
