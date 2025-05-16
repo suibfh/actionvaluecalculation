@@ -386,6 +386,7 @@ function runSimulation() {
     resultsTableHeader.innerHTML = '<th>演算</th>'; // Reset header
 
     // Add unit headers to the table in the correct order
+    // Iterate through the units in the desired display order (currentUnitsData)
     currentUnitsData.forEach(unit => {
         const th = document.createElement('th');
         th.textContent = unit.name;
