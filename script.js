@@ -19,7 +19,8 @@ class Unit {
     }
 
     // Calculate effective agility based on active buffs/debuffs
-    getEffectiveAgility(currentCalc) { // Pass current calculation number
+    // Pass current calculation number AND the list of units acting in this calculation
+    getEffectiveAgility(currentCalc, actingUnitsInThisCalc) {
         let effectiveAgility = this.baseAgility;
         let skillBuffPercent = 0;
         let bbBuffPercent = 0;
@@ -34,8 +35,32 @@ class Unit {
 
 
         this.activeBuffs.forEach(buff => {
-            // Only apply agility buffs if the current calculation is >= the start calculation
+            // Check if the buff is active in the current calculation based on its startCalc
             if (currentCalc >= buff.startCalc) {
+                // For action-triggered buffs applied in THIS calculation (currentCalc),
+                // check if the target unit acted *before* the source unit in this calc's action order.
+                if (buff.durationType === 'action' && buff.startCalc === currentCalc && buff.sourceUnitId) {
+                    const sourceUnit = actingUnitsInThisCalc.find(u => u.id === buff.sourceUnitId);
+                    const targetUnit = actingUnitsInThisCalc.find(u => u.id === this.id); // 'this' is the target unit
+
+                    // If both source and target acted in this calc, and target acted before source
+                    if (sourceUnit && targetUnit) {
+                        const sourceIndex = actingUnitsInThisCalc.indexOf(sourceUnit);
+                        const targetIndex = actingUnitsInThisCalc.indexOf(targetUnit);
+                        if (targetIndex !== -1 && sourceIndex !== -1 && targetIndex < sourceIndex) {
+                            // Agility effect of this specific buff instance is delayed until next calc (currentCalc + 1)
+                            // Skip applying its agility value for *this* calculation
+                            return; // Skip this buff for agility calculation in *this* turn
+                        }
+                    }
+                    // If the target unit did NOT act in this calc, or acted after the source, the agility effect applies from this calc.
+                    // If the source unit did NOT act in this calc (but the buff is action-triggered with startCalc=currentCalc, which shouldn't happen with current logic),
+                    // the agility effect also applies from this calc.
+                }
+                // If the buff is calculation-triggered OR action-triggered but applied in a *previous* calculation,
+                // OR action-triggered and applied in *this* calculation but the target acted after the source,
+                // apply its agility value.
+
                 if (buff.type === 'agility_buff_skill') {
                     skillBuffPercent = Math.max(skillBuffPercent, buff.value);
                 } else if (buff.type === 'agility_buff_bb') {
@@ -386,9 +411,7 @@ function runSimulation() {
         row.appendChild(calcCell);
 
         // --- Buff/Debuff Application (at the start of the calculation) ---
-        // Identify buffs/debuffs that are applied in this calculation
-        // This is for buffs/debuffs whose *application trigger* is the start of a specific calculation.
-        // Action-triggered buffs will be applied later in the action processing phase.
+        // Identify buffs/debuffs that are applied in this calculation due to a *calculation trigger*.
         const calcTriggeredBuffsToApplyThisCalc = simulationBuffs.filter(buff =>
             buff.durationType === 'calculation' && buff.startCalc === calc && buff.remainingDuration > 0 // Check startCalc and if not already consumed in simulation
         );
@@ -419,41 +442,49 @@ function runSimulation() {
 
 
         // --- Action Value Gain (based on effective agility) ---
+        // Determine acting units *before* calculating AV gain to pass to getEffectiveAgility
+        let potentialActingUnits = simulationUnits.filter(unit => unit.actionValue >= ACTION_THRESHOLD);
+         // Sort potential acting units to determine action order in this calc
+         potentialActingUnits.sort((a, b) => {
+             if (b.actionValue !== a.actionValue) {
+                 return b.actionValue - a.actionValue; // Higher action value first
+             }
+             // If action values are equal, sort by original input order
+             const aIndex = currentUnitsData.findIndex(unit => unit.id === a.id);
+             const bIndex = currentUnitsData.findIndex(unit => unit.id === b.id);
+             return aIndex - bIndex; // Earlier in the list first
+         });
+
+
         simulationUnits.forEach(unit => {
              // Add action value based on effective agility, considering buffs active from this calculation
-             unit.addActionValue(unit.getEffectiveAgility(calc)); // Pass current calc to getEffectiveAgility
+             // Pass current calc and the determined action order for this calc
+             unit.addActionValue(unit.getEffectiveAgility(calc, potentialActingUnits));
         });
 
         // --- Action Check and Processing ---
-        // Check for all units that can act (>= 1000 AV)
+        // Re-check for units that can act after gaining AV
         let actingUnits = simulationUnits.filter(unit => unit.actionValue >= ACTION_THRESHOLD);
 
-        // Sort acting units: higher action value first, then original input order
+        // Sort acting units again based on updated AV and original order
         actingUnits.sort((a, b) => {
             if (b.actionValue !== a.actionValue) {
                 return b.actionValue - a.actionValue; // Higher action value first
             }
             // If action values are equal, sort by original input order
-            const aIndex = currentUnitsData.findIndex(unit => unit.id === a.id); // Use original 'currentUnitsData' array for input order
+            const aIndex = currentUnitsData.findIndex(unit => unit.id === a.id);
             const bIndex = currentUnitsData.findIndex(unit => unit.id === b.id);
             return aIndex - bIndex; // Earlier in the list first
         });
 
         // Process actions for acting units (in sorted order)
         // This is where action-triggered buffs/debuffs are applied
-        let actionTriggeredBuffsToApplyAfterAction = []; // Collect buffs triggered by actions in this calc
-
         actingUnits.forEach(unit => {
             // This unit acts
             unit.resetActionValue(); // Store value before reset, reset AV, increment action count, decrement action-based buff durations
 
             // --- Apply Action-Triggered Buffs/Debuffs (immediately after action) ---
             // Identify buffs/debuffs that are triggered by *this unit's* action at *this calculation*
-            // This requires a way to link a buff definition to a unit's action.
-            // For now, we'll use the 'startCalc' property to indicate the calculation where the *triggering action* occurs.
-            // And the 'sourceUnitId' to identify the unit performing the action.
-            // This is a simplification; a full implementation would need a more robust trigger system.
-
              const actionTriggeredBuffsFromThisUnit = simulationBuffs.filter(buff =>
                  buff.durationType === 'action' && buff.startCalc === calc && buff.sourceUnitId === unit.id && buff.remainingDuration > 0 // Check trigger calc, source unit, and if not already consumed
              );
