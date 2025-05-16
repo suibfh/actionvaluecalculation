@@ -1,18 +1,18 @@
 // script.js
 const NUM_CALCULATIONS = 50;
-const MAX_UNITS_PER_SIDE = 5;
+const MAX_UNITS = 10; // 最大ユニット数を10に変更
 const ACTION_THRESHOLD = 1000;
 
 // --- Data Structures ---
 
 // Represents a unit
 class Unit {
-    constructor(id, name, baseAgility, side) {
-        this.id = id; // Unique ID (e.g., 'player-1', 'enemy-3')
-        this.name = name || `Unit ${id}`; // Default name
+    // sideプロパティを削除
+    constructor(id, name, baseAgility) {
+        this.id = id; // Unique ID (e.g., 'unit-1', 'unit-10')
+        this.name = name || `ユニット ${id.split('-')[1]}`; // デフォルト名を「ユニット X」に変更
         this.baseAgility = baseAgility;
         this.actionValue = 0;
-        this.side = side; // 'player' or 'enemy'
         this.actionCount = 0; // Number of times this unit has acted
         this.activeBuffs = []; // Array to hold active BuffDebuff objects
         this.actionValueAtAct = 0; // Store action value when acting
@@ -160,49 +160,30 @@ let activeBuffDebuffs = []; // Array of BuffDebuff objects added by the user
 
 // Function to generate unit input fields and target/source checkboxes/selects
 function generateUnitInputs() {
-    const playerInputsDiv = document.getElementById('player-units');
-    const enemyInputsDiv = document.getElementById('enemy-units');
+    // player-unitsとenemy-unitsの代わりにall-unitsを使用
+    const allUnitsDiv = document.getElementById('all-units');
     const targetUnitsDiv = document.getElementById('buff-debuff-target-units');
     const sourceUnitSelect = document.getElementById('buff-debuff-source');
 
-    playerInputsDiv.innerHTML = '<h3>プレイヤーパーティ</h3>';
-    enemyInputsDiv.innerHTML = '<h3>敵パーティ</h3>';
+    allUnitsDiv.innerHTML = '<h3>ユニット一覧</h3>'; // ヘッダーを変更
     targetUnitsDiv.innerHTML = ''; // Clear previous targets
     sourceUnitSelect.innerHTML = '<option value="">なし (敵など)</option>'; // Reset source options
 
     allUnits = []; // Clear previous units
 
-    // Generate Player Unit Inputs and add to allUnits
-    for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
-        const playerId = `player-${i}`;
-        playerInputsDiv.innerHTML += `
+    // Generate Unit Inputs (1 to 10)
+    for (let i = 1; i <= MAX_UNITS; i++) {
+        const unitId = `unit-${i}`; // IDフォーマットを変更
+        allUnitsDiv.innerHTML += `
             <div class="unit-input">
-                <label for="${playerId}-name">ユニット ${i} (プレイヤー)</label>
-                <input type="text" id="${playerId}-name" value="プレイヤー ${i}">
-                <label for="${playerId}-agility">敏捷:</label>
-                <input type="number" id="${playerId}-agility" value="100" min="1">
+                <label for="${unitId}-name">ユニット ${i}</label> <input type="text" id="${unitId}-name" value="ユニット ${i}"> <label for="${unitId}-agility">敏捷:</label>
+                <input type="number" id="${unitId}-agility" value="100" min="1">
             </div>
         `;
-        const unit = new Unit(playerId, `プレイヤー ${i}`, 100, 'player');
+        // sideプロパティを削除してUnitオブジェクトを作成
+        const unit = new Unit(unitId, `ユニット ${i}`, 100);
         allUnits.push(unit);
          // Add to source unit select
-        sourceUnitSelect.innerHTML += `<option value="${unit.id}">${unit.name}</option>`;
-    }
-
-    // Generate Enemy Unit Inputs and add to allUnits
-     for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
-        const enemyId = `enemy-${i}`;
-         enemyInputsDiv.innerHTML += `
-            <div class="unit-input">
-                <label for="${enemyId}-name">ユニット ${i} (敵)</label>
-                <input type="text" id="${enemyId}-name" value="敵 ${i}">
-                <label for="${enemyId}-agility">敏捷:</label>
-                <input type="number" id="${enemyId}-agility" value="100" min="1">
-            </div>
-        `;
-        const unit = new Unit(enemyId, `敵 ${i}`, 100, 'enemy');
-        allUnits.push(unit);
-        // Add to source unit select
         sourceUnitSelect.innerHTML += `<option value="${unit.id}">${unit.name}</option>`;
     }
 
@@ -253,21 +234,14 @@ function updateBuffInputFields() {
 // Function to get unit data from inputs
 function getUnitsFromInputs() {
     const units = [];
-    for (let i = 1; i <= MAX_UNITS_PER_SIDE; i++) {
-        // Player Unit
-        const playerId = `player-${i}`;
-        const playerNameInput = document.getElementById(`${playerId}-name`);
-        const playerAgilityInput = document.getElementById(`${playerId}-agility`);
-        if (playerNameInput && playerAgilityInput && parseInt(playerAgilityInput.value) > 0) {
-             units.push(new Unit(playerId, playerNameInput.value, parseInt(playerAgilityInput.value), 'player'));
-        }
-
-        // Enemy Unit
-        const enemyId = `enemy-${i}`;
-        const enemyNameInput = document.getElementById(`${enemyId}-name`);
-        const enemyAgilityInput = document.getElementById(`${enemyId}-agility`);
-         if (enemyNameInput && enemyAgilityInput && parseInt(enemyAgilityInput.value) > 0) {
-            units.push(new Unit(enemyId, enemyNameInput.value, parseInt(enemyAgilityInput.value), 'enemy'));
+    // ユニット1から10までを取得
+    for (let i = 1; i <= MAX_UNITS; i++) {
+        const unitId = `unit-${i}`;
+        const unitNameInput = document.getElementById(`${unitId}-name`);
+        const unitAgilityInput = document.getElementById(`${unitId}-agility`);
+        // sideプロパティは不要になった
+        if (unitNameInput && unitAgilityInput && parseInt(unitAgilityInput.value) > 0) {
+             units.push(new Unit(unitId, unitNameInput.value, parseInt(unitAgilityInput.value)));
         }
     }
     return units;
@@ -395,7 +369,7 @@ function runSimulation() {
 
     // Simulation loop
     // Create simulation units based on current input data
-    const simulationUnits = currentUnitsData.map(unitData => new Unit(unitData.id, unitData.name, unitData.baseAgility, unitData.side));
+    const simulationUnits = currentUnitsData.map(unitData => new Unit(unitData.id, unitData.name, unitData.baseAgility)); // sideプロパティは不要になった
 
     // Create a deep copy of active buffs/debuffs for the simulation
     const simulationBuffs = JSON.parse(JSON.stringify(activeBuffDebuffs));
@@ -451,6 +425,7 @@ function runSimulation() {
                  return b.actionValue - a.actionValue; // Higher action value first
              }
              // If action values are equal, sort by original input order
+             // 単一リストになったため、元のcurrentUnitsDataのインデックスでソート
              const aIndex = currentUnitsData.findIndex(unit => unit.id === a.id);
              const bIndex = currentUnitsData.findIndex(unit => unit.id === b.id);
              return aIndex - bIndex; // Earlier in the list first
@@ -473,6 +448,7 @@ function runSimulation() {
                 return b.actionValue - a.actionValue; // Higher action value first
             }
             // If action values are equal, sort by original input order
+            // 単一リストになったため、元のcurrentUnitsDataのインデックスでソート
             const aIndex = currentUnitsData.findIndex(unit => unit.id === a.id);
             const bIndex = currentUnitsData.findIndex(unit => unit.id === b.id);
             return aIndex - bIndex; // Earlier in the list first

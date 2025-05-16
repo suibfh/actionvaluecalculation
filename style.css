@@ -23,12 +23,14 @@ h1, h2, h3 {
 .input-section, .results-section {
     margin-bottom: 20px;
 }
-.unit-inputs {
+/* ユニット入力エリアのスタイルを単一リスト用に調整 */
+#all-units { /* IDを変更 */
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 15px;
     margin-bottom: 15px;
 }
+
 .unit-input {
     border: 1px solid #ccc;
     padding: 10px;
