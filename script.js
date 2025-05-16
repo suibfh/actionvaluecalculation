@@ -141,7 +141,7 @@ class BuffDebuff {
 
         if (this.type.startsWith('agility')) {
             effectDesc = `敏捷 ${this.value}% ${this.value >= 0 ? 'アップ' : 'ダウン'}`; // Use value sign for description
-            durationDesc = `(${this.duration} 行動)`;
+            durationDesc = `(演算 ${this.startCalc} で付与, ${this.duration} 行動)`; // Added startCalc to description
         } else { // action_value
              effectDesc = `行動値 ${this.value > 0 ? '+' : ''}${this.value}`;
              durationDesc = `(演算 ${this.startCalc} で付与)`;
@@ -520,10 +520,10 @@ function runSimulation() {
 
         // --- Display Results for this Calculation ---
         // Ensure cells are added in the correct order matching the table header
-        // Create an array to hold the cells for this row in the correct order
-        const rowCells = Array(simulationUnits.length).fill(null); // Initialize with nulls
-
-        simulationUnits.forEach(unit => { // Iterate through simulation units
+        // Iterate based on the original order (currentUnitsData)
+        currentUnitsData.forEach(unitData => {
+             // Find the corresponding simulation unit for this original unit data
+             const unit = simulationUnits.find(u => u.id === unitData.id);
              const cell = document.createElement('td');
 
             const didAct = actingUnits.some(actingUnit => actingUnit.id === unit.id);
@@ -559,20 +559,8 @@ function runSimulation() {
                  // Add tooltip or text indicating which buff/debuff was applied? Can be complex.
             }
 
-            // Find the index of this unit in the desired order (currentUnitsData order)
-            const unitIndex = currentUnitsData.findIndex(unitData => unitData.id === unit.id);
-            if (unitIndex !== -1) {
-                 rowCells[unitIndex] = cell; // Place the created cell at the correct index
-            } else {
-                 console.error(`Error: Unit with ID ${unit.id} not found in original data.`);
-            }
-        });
-
-        // Append all cells from the rowCells array to the row in their correct order
-        rowCells.forEach(cell => {
-            if (cell) { // Ensure cell was successfully created
-                row.appendChild(cell);
-            }
+            // Append the created cell directly to the row
+            row.appendChild(cell);
         });
 
         resultsTableBody.appendChild(row);
